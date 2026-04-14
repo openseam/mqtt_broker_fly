@@ -17,7 +17,11 @@ primary_region = "iad"
   protocol = "tcp"
   auto_stop_machines = "off"
   auto_start_machines = true
+  # Single machine — EMQX is not clustered. Two unclustered nodes would break
+  # pub/sub (publisher on node 1, subscriber on node 2 = no message delivery).
+  # Cluster before increasing this.
   min_machines_running = 1
+  max_machines_running = 1
 
   [[services.ports]]
     port = 1883
