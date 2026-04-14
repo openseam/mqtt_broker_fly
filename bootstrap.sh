@@ -16,16 +16,16 @@ log() { echo "[bootstrap] $*"; }
 ulimit -n 1048576 2>/dev/null || log "WARNING: Could not set nofile ulimit to 1048576 — proceeding with system default."
 
 # ── Set a unique Erlang node name so this machine can join the EMQX cluster ──
-# Every Fly.io machine gets a unique FLY_MACHINE_ID. The cluster discovery
-# strategy (dns / openseam-emqx.internal) will find all peers automatically.
-# Without a unique name, multiple machines would collide and refuse to cluster.
-if [[ -n "${FLY_MACHINE_ID:-}" ]]; then
-    export EMQX_NODE__NAME="emqx@${FLY_MACHINE_ID}.vm.openseam-emqx.internal"
+# EMQX requires name@IP format (not name@hostname) when using DNS/AAAA
+# cluster discovery. Fly.io sets FLY_PRIVATE_IP to the machine's unique private
+# IPv6 address (fdaa: range). IPv6 addresses go in brackets in node names.
+if [[ -n "${FLY_PRIVATE_IP:-}" ]]; then
+    export EMQX_NODE__NAME="emqx@[${FLY_PRIVATE_IP}]"
     log "Node name: ${EMQX_NODE__NAME}"
 else
     # Local dev fallback — single-node mode.
     export EMQX_NODE__NAME="emqx@127.0.0.1"
-    log "WARNING: FLY_MACHINE_ID not set — using single-node fallback name."
+    log "WARNING: FLY_PRIVATE_IP not set — using single-node fallback (local dev only)."
 fi
 
 # ── Start EMQX in the background ──────────────────────────────────────────────
