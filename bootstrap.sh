@@ -15,6 +15,19 @@ log() { echo "[bootstrap] $*"; }
 # ── Set file descriptor limit for large numbers of concurrent MQTT connections ─
 ulimit -n 1048576 2>/dev/null || log "WARNING: Could not set nofile ulimit to 1048576 — proceeding with system default."
 
+# ── Set a unique Erlang node name so this machine can join the EMQX cluster ──
+# Every Fly.io machine gets a unique FLY_MACHINE_ID. The cluster discovery
+# strategy (dns / openseam-emqx.internal) will find all peers automatically.
+# Without a unique name, multiple machines would collide and refuse to cluster.
+if [[ -n "${FLY_MACHINE_ID:-}" ]]; then
+    export EMQX_NODE__NAME="emqx@${FLY_MACHINE_ID}.vm.openseam-emqx.internal"
+    log "Node name: ${EMQX_NODE__NAME}"
+else
+    # Local dev fallback — single-node mode.
+    export EMQX_NODE__NAME="emqx@127.0.0.1"
+    log "WARNING: FLY_MACHINE_ID not set — using single-node fallback name."
+fi
+
 # ── Start EMQX in the background ──────────────────────────────────────────────
 log "Starting EMQX..."
 /usr/bin/docker-entrypoint.sh "$@" &
