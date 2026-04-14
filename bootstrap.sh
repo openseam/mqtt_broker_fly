@@ -15,19 +15,6 @@ log() { echo "[bootstrap] $*"; }
 # ── Set file descriptor limit for large numbers of concurrent MQTT connections ─
 ulimit -n 1048576 2>/dev/null || log "WARNING: Could not set nofile ulimit to 1048576 — proceeding with system default."
 
-# ── Set a unique Erlang node name so this machine can join the EMQX cluster ──
-# EMQX requires name@IP format (not name@hostname) when using DNS/AAAA
-# cluster discovery. Fly.io sets FLY_PRIVATE_IP to the machine's unique private
-# IPv6 address (fdaa: range). IPv6 addresses go in brackets in node names.
-if [[ -n "${FLY_PRIVATE_IP:-}" ]]; then
-    export EMQX_NODE__NAME="emqx@[${FLY_PRIVATE_IP}]"
-    log "Node name: ${EMQX_NODE__NAME}"
-else
-    # Local dev fallback — single-node mode.
-    export EMQX_NODE__NAME="emqx@127.0.0.1"
-    log "WARNING: FLY_PRIVATE_IP not set — using single-node fallback (local dev only)."
-fi
-
 # ── Start EMQX in the background ──────────────────────────────────────────────
 log "Starting EMQX..."
 /usr/bin/docker-entrypoint.sh "$@" &
