@@ -99,5 +99,21 @@ else
     log "WARNING: One or more users failed to provision. Check secrets MQTT_SEAMBIT_CLIENT_PASSWORD and MQTT_SEAMBIT_WEB_PASSWORD."
 fi
 
+# ── Periodic healthchecks.io heartbeat ────────────────────────────────────────
+# Pings every 5 minutes so healthchecks.io (10 min period, 2 min grace) stays green.
+if [[ -n "${HEARTBEAT_URL:-}" ]]; then
+    log "Starting healthchecks.io heartbeat loop (every 5 minutes)."
+    (
+        while kill -0 "$EMQX_PID" 2>/dev/null; do
+            curl -fsS --retry 3 --max-time 10 "${HEARTBEAT_URL}" >/dev/null 2>&1 \
+                && log "heartbeat.pinged" \
+                || log "WARNING: heartbeat ping failed — will retry in 5 minutes"
+            sleep 300
+        done
+    ) &
+else
+    log "WARNING: HEARTBEAT_URL not set — healthchecks.io ping disabled."
+fi
+
 # ── Keep running until EMQX exits ─────────────────────────────────────────────
 wait "$EMQX_PID"
