@@ -47,7 +47,8 @@ backend pods            →                                  →                
 3. Polls `GET /api/v5/status` until EMQX reports `running` (timeout: 120s)
 4. Authenticates with the dashboard API to get a JWT token
 5. Creates `seambit-client` and `seambit-web` users via the API (accepts 201 or 409)
-6. `wait`s on the EMQX process — container exits when EMQX exits
+6. Starts a background loop that pings the `HEARTBEAT_URL` every 5 minutes (healthchecks.io)
+7. `wait`s on the EMQX process — container exits when EMQX exits
 
 Fully stateless. Users are re-provisioned on every start from Fly.io secrets. No volumes or external state required.
 
@@ -64,20 +65,22 @@ Fully stateless. Users are re-provisioned on every start from Fly.io secrets. No
 
 ## Fly.io secrets
 
-Three secrets must be set before the first deployment:
+Four secrets must be set before the first deployment:
 
 ```bash
 flyctl secrets set \
   EMQX_DASHBOARD__DEFAULT_PASSWORD="..." \
   MQTT_SEAMBIT_CLIENT_PASSWORD="..." \
   MQTT_SEAMBIT_WEB_PASSWORD="..." \
+  HEARTBEAT_URL="https://hc-ping.com/df107be4-97bb-4fd4-8ff7-5be49f635bae" \
   --app openseam-emqx
 ```
 
-Values are the same as the AWS Secrets Manager secrets used by the Fargate version:
+Values:
 - `EMQX_DASHBOARD__DEFAULT_PASSWORD` ← `prod/emqx/dashboard_password`
 - `MQTT_SEAMBIT_CLIENT_PASSWORD` ← `dev_seambit_MQTT_client_password`
 - `MQTT_SEAMBIT_WEB_PASSWORD` ← `dev-mq-seambit-web`
+- `HEARTBEAT_URL` ← healthchecks.io ping URL for `mqtt_broker` check
 
 ---
 
@@ -97,6 +100,7 @@ flyctl secrets set \
   EMQX_DASHBOARD__DEFAULT_PASSWORD="..." \
   MQTT_SEAMBIT_CLIENT_PASSWORD="..." \
   MQTT_SEAMBIT_WEB_PASSWORD="..." \
+  HEARTBEAT_URL="https://hc-ping.com/df107be4-97bb-4fd4-8ff7-5be49f635bae" \
   --app openseam-emqx
 
 # Deploy
@@ -126,6 +130,30 @@ Expected output:
 [bootstrap] User 'seambit-web' created (201).
 [bootstrap] All users provisioned. EMQX is operational.
 ```
+
+---
+
+## Session buffering and QoS configuration
+
+EMQX is configured to buffer messages for offline subscribers. This is the mechanism that prevents burst loss when the burst recorder pod briefly restarts.
+
+**How it works:**
+
+- Seambit firmware publishes sensor packets at **QoS 1** — EMQX ACKs every packet. If the seambit's WiFi drops before receiving the ACK, the firmware retransmits.
+- `worker-bursts-recorder` subscribes at **QoS 1** with `clean_start: false` and a fixed clientid (`burst-recorder-main`). EMQX maintains a persistent session for this clientid.
+- While the burst recorder is offline (pod restart, deploy), EMQX queues up to 1,000 messages in the session queue.
+- When the burst recorder reconnects, EMQX replays all queued messages before new ones arrive — zero packet loss during brief outages.
+
+**Relevant EMQX defaults that make this work** (no configuration change needed — these are EMQX 5.x defaults):
+
+| Setting | Value | Effect |
+|---|---|---|
+| `max_qos_allowed` | 2 | Accepts QoS 0/1/2 from publishers |
+| `max_mqueue_len` | 1000 | Per-session offline queue depth |
+| `session_expiry_interval` | 7200 s (2 h) | Session survives up to 2 hours of pod downtime |
+| `max_packet_size` | 1 MB | Well above our ~1.4 KB sensor payloads |
+
+**Firmware requirement**: seambits must publish at QoS 1 and use `clean_start: false` to benefit from this. Firmware v2.2+ (espMqttClient) satisfies this. Do not use PubSubClient — it hardcodes QoS 0.
 
 ---
 
